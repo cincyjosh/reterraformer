@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -21,7 +22,8 @@ type Config struct {
 	MaxTokens int64
 }
 
-func (c *Config) setDefaults() {
+// SetDefaults fills in zero-value fields with sensible defaults.
+func (c *Config) SetDefaults() {
 	if c.Model == "" {
 		c.Model = "claude-opus-4-7"
 	}
@@ -33,9 +35,48 @@ func (c *Config) setDefaults() {
 	}
 }
 
+// Validate returns an error if the model/effort combination is not supported.
+//
+// Rules from the Anthropic API:
+//   - xhigh: claude-opus-4-7 only
+//   - max:   Opus models only (claude-opus-*)
+//   - low/medium/high: all models that support effort
+//   - effort is not supported on claude-haiku-* or claude-sonnet-4-5
+func (c *Config) Validate() error {
+	validEfforts := map[anthropic.OutputConfigEffort]bool{
+		anthropic.OutputConfigEffortLow:    true,
+		anthropic.OutputConfigEffortMedium: true,
+		anthropic.OutputConfigEffortHigh:   true,
+		anthropic.OutputConfigEffortXhigh:  true,
+		anthropic.OutputConfigEffortMax:    true,
+	}
+	if !validEfforts[c.Effort] {
+		return fmt.Errorf("invalid effort %q: must be one of low, medium, high, xhigh, max", c.Effort)
+	}
+
+	isOpus47 := c.Model == "claude-opus-4-7"
+	isOpus := strings.Contains(c.Model, "opus")
+	isSonnet45 := strings.Contains(c.Model, "sonnet-4-5")
+	isHaiku := strings.Contains(c.Model, "haiku")
+
+	if isHaiku || isSonnet45 {
+		return fmt.Errorf("model %q does not support the effort parameter; use claude-sonnet-4-6 or an Opus model", c.Model)
+	}
+	if c.Effort == anthropic.OutputConfigEffortXhigh && !isOpus47 {
+		return fmt.Errorf("effort=xhigh requires claude-opus-4-7; %q does not support it", c.Model)
+	}
+	if c.Effort == anthropic.OutputConfigEffortMax && !isOpus {
+		return fmt.Errorf("effort=max requires an Opus model; %q does not support it", c.Model)
+	}
+	return nil
+}
+
 // Run executes the agentic import loop.
 func Run(ctx context.Context, project, repoDir, outputDir, apiKey string, cfg Config) error {
-	cfg.setDefaults()
+	cfg.SetDefaults()
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	client := anthropic.NewClient(option.WithAPIKey(apiKey))
 
 	h := &handler{

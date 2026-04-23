@@ -48,20 +48,24 @@ func init() {
 }
 
 func runAgent(cmd *cobra.Command, _ []string) error {
-	apiKey := agentAPIKey
-	if apiKey == "" {
-		apiKey = os.Getenv("ANTHROPIC_API_KEY")
-	}
-	if apiKey == "" {
-		return fmt.Errorf("Anthropic API key required: set --api-key or ANTHROPIC_API_KEY")
-	}
-
 	cfg := agent.Config{
 		Model:     agentModel,
 		MaxTokens: agentMaxTokens,
 	}
 	if agentEffort != "" {
 		cfg.Effort = anthropic.OutputConfigEffort(agentEffort)
+	}
+	cfg.SetDefaults()
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	apiKey := agentAPIKey
+	if apiKey == "" {
+		apiKey = os.Getenv("ANTHROPIC_API_KEY")
+	}
+	if apiKey == "" {
+		return fmt.Errorf("Anthropic API key required: set --api-key or ANTHROPIC_API_KEY")
 	}
 
 	fmt.Printf("Starting agent for project %q → output: %s\n", agentProject, agentOutputDir)
