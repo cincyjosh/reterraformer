@@ -13,3 +13,10 @@ generated/
 .idea/
 .vscode/
 *.swp
+
+# Credentials
+.env
+.env.*
+*.json.key
+application_default_credentials.json
+service-account*.json
