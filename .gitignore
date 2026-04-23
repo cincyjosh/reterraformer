@@ -1,0 +1,15 @@
+# Build output
+reterraformer
+reterraformer.exe
+
+# Generated terraform output
+generated/
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+
+# IDE
+.idea/
+.vscode/
+*.swp
