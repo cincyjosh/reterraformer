@@ -10,10 +10,32 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
-const model = "claude-opus-4-7"
+// Config controls model selection and effort level for the agentic loop.
+type Config struct {
+	// Model is the Claude model ID. Defaults to claude-opus-4-7.
+	Model string
+	// Effort controls reasoning depth. Valid values: low, medium, high, xhigh, max.
+	// xhigh and max require Opus. Defaults to xhigh.
+	Effort anthropic.OutputConfigEffort
+	// MaxTokens is the per-response output ceiling. Defaults to 32000.
+	MaxTokens int64
+}
+
+func (c *Config) setDefaults() {
+	if c.Model == "" {
+		c.Model = "claude-opus-4-7"
+	}
+	if c.Effort == "" {
+		c.Effort = anthropic.OutputConfigEffortXhigh
+	}
+	if c.MaxTokens == 0 {
+		c.MaxTokens = 32000
+	}
+}
 
 // Run executes the agentic import loop.
-func Run(ctx context.Context, project, repoDir, outputDir, apiKey string) error {
+func Run(ctx context.Context, project, repoDir, outputDir, apiKey string, cfg Config) error {
+	cfg.setDefaults()
 	client := anthropic.NewClient(option.WithAPIKey(apiKey))
 
 	h := &handler{
@@ -47,7 +69,6 @@ Rules:
 Start by listing the repository root, then read relevant files to understand conventions, then enumerate resources, then generate the HCL.`, project),
 		},
 	}
-	// Cache the system prompt as a stable prefix.
 	system[len(system)-1].CacheControl = anthropic.NewCacheControlEphemeralParam()
 
 	tools := toolDefs()
@@ -60,38 +81,39 @@ Start by listing the repository root, then read relevant files to understand con
 		)),
 	))
 
+	fmt.Printf("model=%s effort=%s max_tokens=%d\n", cfg.Model, cfg.Effort, cfg.MaxTokens)
+
 	for {
 		resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
-			Model:     model,
-			MaxTokens: 8192,
+			Model:     cfg.Model,
+			MaxTokens: cfg.MaxTokens,
 			System:    system,
 			Tools:     tools,
 			Messages:  messages,
 			Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{}},
+			OutputConfig: anthropic.OutputConfigParam{
+				Effort: cfg.Effort,
+			},
 		})
 		if err != nil {
 			return fmt.Errorf("claude API error: %w", err)
 		}
 
-		// Print any text blocks to stdout as progress updates.
 		for _, block := range resp.Content {
 			switch v := block.AsAny().(type) {
 			case anthropic.TextBlock:
 				fmt.Fprintln(os.Stdout, v.Text)
 			case anthropic.ThinkingBlock:
-				// Silently ignore thinking blocks — they're for the model.
 				_ = v
 			}
 		}
 
-		// Append assistant turn to history.
 		messages = append(messages, resp.ToParam())
 
 		if resp.StopReason != anthropic.StopReasonToolUse {
 			break
 		}
 
-		// Build tool results.
 		var results []anthropic.ContentBlockParamUnion
 		for _, block := range resp.Content {
 			toolUse, ok := block.AsAny().(anthropic.ToolUseBlock)
